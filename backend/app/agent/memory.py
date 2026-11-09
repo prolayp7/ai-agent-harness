@@ -56,6 +56,8 @@ You must respond in valid JSON only with these fields:
 Rules:
 - Think step by step in the "thought" field.
 - Use a tool when you need information or calculation.
+- "args" must always be a JSON object whose keys are the tool's input parameter names; never provide a bare string or other value.
+- For example, call the calculator with "args": {"expression": "0.15 * 340"}.
 - When you have enough information, set is_final=true and give the final_answer.
 - Never invent tool results. Only use the Observation you receive.
 """

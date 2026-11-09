@@ -1,3 +1,5 @@
 .env
 .env.*
 !.env.example
+*_v1.py
+*_v1.*
