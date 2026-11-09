@@ -23,11 +23,12 @@ class AgentStep(BaseModel):
 class AgentRunRequest(BaseModel):
     goal: str
     max_steps: int = 8
+    require_approval: bool = False
 
 class AgentRunResponse(BaseModel):
     run_id: str
     goal: str
     steps: List[AgentStep]
     final_answer: Optional[str] = None
-    status: Literal["completed", "max_steps_reached", "error"]
+    status: Literal["completed", "max_steps_reached", "waiting_approval", "error"]
     created_at: datetime

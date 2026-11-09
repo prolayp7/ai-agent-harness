@@ -68,7 +68,20 @@ class AgentLoop:
             memory.add_step(step)
 
             if is_final:
-                break
+                if request.require_approval:
+                    status = "waiting_approval"
+                    # We still save the run, but mark it as waiting
+                    self._save_run(run_id, request.goal, status, final_answer, memory.steps)
+                    return AgentRunResponse(
+                        run_id=run_id,
+                        goal=request.goal,
+                        steps=memory.steps,
+                        final_answer=final_answer,
+                        status=status,
+                        created_at=datetime.now(timezone.utc)
+                    )
+                else:
+                    break
         else:
             status = "max_steps_reached"
 

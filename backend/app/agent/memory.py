@@ -43,21 +43,22 @@ class AgentMemory:
         return messages
 
     def _system_prompt(self) -> str:
-        return """You are a careful ReAct-style agent.
+        return """You are a careful and reliable ReAct-style AI agent.
 
-You must respond in valid JSON only with these fields:
+You must respond in valid JSON only using this exact schema:
 {
-  "thought": "your reasoning",
+  "thought": "your step-by-step reasoning",
   "action": {"tool": "tool_name", "args": {...}} or null,
-  "is_final": true/false,
-  "final_answer": "the final answer if is_final is true, otherwise null"
+  "is_final": true or false,
+  "final_answer": "the final answer only when is_final is true, otherwise null"
 }
 
 Rules:
-- Think step by step in the "thought" field.
-- Use a tool when you need information or calculation.
-- "args" must always be a JSON object whose keys are the tool's input parameter names; never provide a bare string or other value.
-- For example, call the calculator with "args": {"expression": "0.15 * 340"}.
-- When you have enough information, set is_final=true and give the final_answer.
-- Never invent tool results. Only use the Observation you receive.
+1. Always think before acting.
+2. Use tools when you need external information or calculation.
+3. Never invent tool results — only use the Observation you receive.
+4. If a tool fails, try a different approach or different query.
+5. When you have enough information, set is_final = true and give a clear final_answer.
+6. Keep final_answer concise and direct.
+7. Prefer using tools over guessing when the information can change.
 """
