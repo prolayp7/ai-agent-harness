@@ -1,10 +1,15 @@
+# app/agent/loop.py
+
 import uuid
 from datetime import datetime, timezone
-from inspect import Parameter, signature
-from typing import Any
 from sqlalchemy.orm import Session
 
-from app.models.schemas import AgentRunRequest, AgentRunResponse, AgentStep, ToolCall
+from app.models.schemas import (
+    AgentRunRequest,
+    AgentRunResponse,
+    AgentStep,
+    ToolCall
+)
 from app.models.db_models import AgentRun, AgentStepDB
 from app.agent.memory import AgentMemory
 from app.agent.tools.base import BaseTool
@@ -25,9 +30,9 @@ class AgentLoop:
             messages = memory.get_messages_for_llm()
             llm_output = call_llm(messages, tools=list(self.tools.values()))
 
-            thought = llm_output["thought"]
+            thought = llm_output.get("thought", "")
             action_data = llm_output.get("action")
-            is_final = llm_output["is_final"]
+            is_final = bool(llm_output.get("is_final", False))
             final_answer = llm_output.get("final_answer")
 
             step = AgentStep(
@@ -36,42 +41,36 @@ class AgentLoop:
                 is_final=is_final
             )
 
+            # Execute tool if the agent requested one
             if action_data and not is_final:
                 tool_name = action_data.get("tool")
-                tool_args = action_data.get("args", {})
+                tool_args = action_data.get("args", {}) or {}
 
-                if not isinstance(tool_name, str) or not tool_name:
-                    observation = "Error: tool name must be a non-empty string"
-                elif tool_name in self.tools:
+                step.action = ToolCall(tool=tool_name, args=tool_args)
+
+                if tool_name in self.tools:
                     try:
-                        tool_args = self._normalize_tool_args(
-                            self.tools[tool_name], tool_args
-                        )
-                    except ValueError as e:
-                        step.action = ToolCall(tool=tool_name, args={})
-                        observation = f"Tool error: {e}"
-                    else:
-                        step.action = ToolCall(tool=tool_name, args=tool_args)
-                        try:
-                            observation = self.tools[tool_name].run(**tool_args)
-                        except Exception as e:
-                            observation = f"Tool error: {str(e)}"
+                        observation = self.tools[tool_name].run(**tool_args)
+                    except Exception as e:
+                        observation = f"Tool error: {str(e)}"
                 else:
-                    step.action = ToolCall(
-                        tool=tool_name,
-                        args=tool_args if isinstance(tool_args, dict) else {},
-                    )
                     observation = f"Error: Unknown tool '{tool_name}'"
 
                 step.observation = observation
 
             memory.add_step(step)
 
+            # ---------- Human-in-the-loop ----------
             if is_final:
                 if request.require_approval:
                     status = "waiting_approval"
-                    # We still save the run, but mark it as waiting
-                    self._save_run(run_id, request.goal, status, final_answer, memory.steps)
+                    self._save_run(
+                        run_id=run_id,
+                        goal=request.goal,
+                        status=status,
+                        final_answer=final_answer,
+                        steps=memory.steps
+                    )
                     return AgentRunResponse(
                         run_id=run_id,
                         goal=request.goal,
@@ -82,11 +81,19 @@ class AgentLoop:
                     )
                 else:
                     break
+
         else:
+            # Loop finished without is_final=True
             status = "max_steps_reached"
 
-        # ----- Save to database -----
-        self._save_run(run_id, request.goal, status, final_answer, memory.steps)
+        # Normal completion path
+        self._save_run(
+            run_id=run_id,
+            goal=request.goal,
+            status=status,
+            final_answer=final_answer,
+            steps=memory.steps
+        )
 
         return AgentRunResponse(
             run_id=run_id,
@@ -97,23 +104,14 @@ class AgentLoop:
             created_at=datetime.now(timezone.utc)
         )
 
-    @staticmethod
-    def _normalize_tool_args(tool: BaseTool, args: object) -> dict[str, Any]:
-        if isinstance(args, dict):
-            return args
-
-        parameters = [
-            parameter
-            for parameter in signature(tool.run).parameters.values()
-            if parameter.kind
-            in (Parameter.POSITIONAL_OR_KEYWORD, Parameter.KEYWORD_ONLY)
-        ]
-        if len(parameters) == 1:
-            return {parameters[0].name: args}
-
-        raise ValueError("tool arguments must be a JSON object")
-
-    def _save_run(self, run_id: str, goal: str, status: str, final_answer: str | None, steps: list[AgentStep]):
+    def _save_run(
+        self,
+        run_id: str,
+        goal: str,
+        status: str,
+        final_answer: str | None,
+        steps: list[AgentStep]
+    ) -> None:
         db: Session = SessionLocal()
         try:
             db_run = AgentRun(
@@ -140,6 +138,6 @@ class AgentLoop:
             db.commit()
         except Exception as e:
             db.rollback()
-            print(f"Failed to save run: {e}")
+            print(f"[Error] Failed to save run {run_id}: {e}")
         finally:
             db.close()
